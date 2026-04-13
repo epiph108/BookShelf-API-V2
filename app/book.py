@@ -1,48 +1,76 @@
-from fastapi import Body,FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from database import SessionLocal, engine
+import models
+
 app = FastAPI()
 
-class Book:
-  id : int
-  title : str
-  author : str 
-  description : str
-  rating : int
+models.Base.metadata.create_all(bind=engine)  # creates books.db automatically
 
-  def __init__(self,id,title,author,description,rating):
-    self.id = id
-    self.title = title
-    self.author = author
-    self.description = description
-    self.rating = rating
+def seed_data():
+    db = SessionLocal()
+    if db.query(models.Book).count() == 0:  # only runs if db is empty
+        starter_books = [
+            models.Book(title="The Hidden Reality", author="Brian Greene", description="Parallel universes and the deep laws of the cosmos", rating=5),
+            models.Book(title="A Brief History of Time", author="Stephen Hawking", description="The origin and fate of the universe", rating=5),
+            models.Book(title="Sapiens", author="Yuval Noah Harari", description="A brief history of humankind", rating=4),
+            models.Book(title="Flatland", author="Edwin A. Abbott", description="A romance of many dimensions", rating=3),
+            models.Book(title="SPQR", author="Mary Beard", description="A history of ancient Rome", rating=4),
+        ]
+        db.add_all(starter_books)
+        db.commit()
+    db.close()
 
-
+seed_data()
 class BookRequest(BaseModel):
-  id : int
-  title : str
-  author : str 
-  description : str
-  rating : int
+    title: str = Field(min_length=3)
+    author: str = Field(min_length=1)
+    description: str = Field(min_length=1, max_length=100)
+    rating: int = Field(gt=0, lt=6)
 
-
-BOOKS = [
-        Book(1, "The Hidden Reality", "Brian Greene", "Parallel universes and the deep laws of the cosmos", 5),
-        Book(2, "A Brief History of Time", "Stephen Hawking", "The origin and fate of the universe", 5),
-        Book(3, "Sapiens", "Yuval Noah Harari", "A brief history of humankind", 4),
-        Book(4, "Gödel, Escher, Bach", "Douglas Hofstadter", "A metaphorical fugue on minds and machines", 5),
-        Book(5, "Flatland", "Edwin A. Abbott", "A romance of many dimensions", 3),
-        Book(6, "The Name of the Rose", "Umberto Eco", "A medieval mystery set in an Italian monastery", 4),
-        Book(7, "The Code Book", "Simon Singh", "The science of secrecy from ancient Egypt to quantum cryptography", 4),
-        Book(8, "SPQR", "Mary Beard", "A history of ancient Rome", 4),
-        Book(9, "The Drunkard's Walk", "Leonard Mlodinow", "How randomness rules our lives", 3),
-        Book(10, "Seven Brief Lessons on Physics", "Carlo Rovelli", "Modern physics for curious readers", 5)
-]
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @app.get("/books")
-async def read_all_books():
-  return BOOKS 
+async def read_all_books(db: Session = Depends(get_db)):
+    return db.query(models.Book).all()
+
+@app.get("/books/{book_id}")
+async def read_book(book_id: int, db: Session = Depends(get_db)):
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    return book
 
 @app.post("/create-book")
-async def create_book(book_request: BookRequest):
-  new_book = Book(**book_request.model_dump())
-  BOOKS.append(book_request)
+async def create_book(book_request: BookRequest, db: Session = Depends(get_db)):
+    new_book = models.Book(**book_request.model_dump())
+    db.add(new_book)
+    db.commit()
+    db.refresh(new_book)
+    return new_book
+
+@app.put("/books/{book_id}")
+async def update_book(book_id: int, book_request: BookRequest, db: Session = Depends(get_db)):
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    book.title = book_request.title
+    book.author = book_request.author
+    book.description = book_request.description
+    book.rating = book_request.rating
+    db.commit()
+    return book
+
+@app.delete("/books/{book_id}")
+async def delete_book(book_id: int, db: Session = Depends(get_db)):
+    book = db.query(models.Book).filter(models.Book.id == book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+    db.delete(book)
+    db.commit()
