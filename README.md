@@ -2,7 +2,7 @@
 
 A REST API built with FastAPI to manage a book collection with full CRUD operations, Pydantic validation, and proper error handling.
 
-![Demo](Images/screenshot.png)
+![Demo](Images/b1.png)
 
 ## Run it locally
 
